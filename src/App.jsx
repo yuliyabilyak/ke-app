@@ -17,8 +17,6 @@ function shuffle(arr) {
 
 function buildSession(level) {
   const pool = questions.filter((q) => q.level === level)
-
-  // Group by category and shuffle within each
   const byCategory = {}
   for (const q of pool) {
     if (!byCategory[q.category]) byCategory[q.category] = []
@@ -27,9 +25,7 @@ function buildSession(level) {
   const categories = shuffle(Object.keys(byCategory))
   for (const cat of categories) byCategory[cat] = shuffle(byCategory[cat])
 
-  const sessionLength = 21 + Math.floor(Math.random() * 5) // 21–25
-
-  // Round-robin across all categories to guarantee ≥5 coverage
+  const sessionLength = 21 + Math.floor(Math.random() * 5)
   const selected = []
   const pointers = Object.fromEntries(categories.map((c) => [c, 0]))
   let catIdx = 0
@@ -54,14 +50,14 @@ function buildSession(level) {
 // ── State ──────────────────────────────────────────────────────────────────────
 
 const INITIAL_STATE = {
-  screen: 'start', // 'start' | 'quiz' | 'summary'
+  screen: 'start',
   level: null,
   sessionQuestions: [],
   availablePool: [],
   currentIndex: 0,
   revealed: false,
   ratings: {},
-  bookmarks: {}, // { [id]: true }
+  bookmarks: {},
   changesRemaining: 3,
 }
 
@@ -79,18 +75,29 @@ function reducer(state, action) {
     case 'REVEAL':
       return { ...state, revealed: true }
 
-    case 'RATE': {
-      const ratings = { ...state.ratings, [action.id]: action.rating }
-      const nextIndex = state.currentIndex + 1
-      const done = nextIndex >= state.sessionQuestions.length
+    case 'RATE':
+      // Save rating only — navigation is explicit via NEXT / PREV / GOTO
+      return { ...state, ratings: { ...state.ratings, [action.id]: action.rating } }
+
+    case 'NEXT':
       return {
         ...state,
-        ratings,
-        currentIndex: done ? state.currentIndex : nextIndex,
+        currentIndex: Math.min(state.currentIndex + 1, state.sessionQuestions.length - 1),
         revealed: false,
-        screen: done ? 'summary' : 'quiz',
       }
-    }
+
+    case 'PREV':
+      return {
+        ...state,
+        currentIndex: Math.max(state.currentIndex - 1, 0),
+        revealed: false,
+      }
+
+    case 'GOTO':
+      return { ...state, currentIndex: action.index, revealed: false }
+
+    case 'FINISH':
+      return { ...state, screen: 'summary' }
 
     case 'BOOKMARK': {
       const bookmarks = { ...state.bookmarks }
@@ -202,37 +209,81 @@ function StartScreen({ dispatch }) {
   )
 }
 
+// ── Progress Dots ──────────────────────────────────────────────────────────────
+
+function ProgressDots({ sessionQuestions, ratings, bookmarks, currentIndex, dispatch }) {
+  return (
+    <div className="flex gap-1.5 flex-wrap">
+      {sessionQuestions.map((q, i) => {
+        const rating = ratings[q.id]
+        const isCurrent = i === currentIndex
+        const isBookmarked = !!bookmarks[q.id]
+
+        let bg = 'bg-white'
+        let border = isBookmarked ? 'border-amber-300' : 'border-gray-200'
+        if (rating === 'good')    { bg = 'bg-green-400'; border = isBookmarked ? 'border-amber-400' : 'border-green-500' }
+        if (rating === 'neutral') { bg = 'bg-gray-300';  border = isBookmarked ? 'border-amber-400' : 'border-gray-400' }
+        if (rating === 'bad')     { bg = 'bg-red-400';   border = isBookmarked ? 'border-amber-400' : 'border-red-500' }
+
+        return (
+          <button
+            key={q.id}
+            onClick={() => dispatch({ type: 'GOTO', index: i })}
+            title={`Q${i + 1}${rating ? ` · ${rating}` : ''}${isBookmarked ? ' · saved' : ''}`}
+            className={`
+              rounded-full border-2 transition-all cursor-pointer
+              ${bg} ${border}
+              ${isCurrent ? 'w-4 h-4 scale-125 shadow-sm' : 'w-3 h-3 hover:scale-110'}
+            `}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Quiz Screen ────────────────────────────────────────────────────────────────
 
 function QuizScreen({ state, dispatch }) {
-  const question = state.sessionQuestions[state.currentIndex]
-  const total = state.sessionQuestions.length
-  const progress = (state.currentIndex / total) * 100
-  const canChange = state.changesRemaining > 0 && state.availablePool.length > 0
-  const isBookmarked = !!state.bookmarks[question.id]
+  const { sessionQuestions, currentIndex, ratings, bookmarks, revealed, availablePool, changesRemaining } = state
+  const question = sessionQuestions[currentIndex]
+  const total = sessionQuestions.length
+  const ratedCount = Object.keys(ratings).length
+  const currentRating = ratings[question.id]
+  const isBookmarked = !!bookmarks[question.id]
+  const canChange = changesRemaining > 0 && availablePool.length > 0
+
+  // Auto-show answer for questions that were already rated
+  const showAnswer = revealed || !!currentRating
+
+  const isFirst = currentIndex === 0
+  const isLast = currentIndex === total - 1
 
   function handleChange() {
     if (!canChange) return
-    const idx = Math.floor(Math.random() * state.availablePool.length)
-    dispatch({ type: 'CHANGE', replacement: state.availablePool[idx] })
+    const idx = Math.floor(Math.random() * availablePool.length)
+    dispatch({ type: 'CHANGE', replacement: availablePool[idx] })
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Progress */}
+    <div className="flex flex-col gap-5">
+      {/* Progress header */}
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between items-center text-sm text-gray-500">
+        <div className="flex justify-between items-center text-sm">
           <span className="font-medium text-gray-700">
-            Question {state.currentIndex + 1} of {total}
+            Question {currentIndex + 1} of {total}
           </span>
-          <span>{Math.round(progress)}% complete</span>
+          <span className="text-gray-400">
+            {ratedCount} of {total} rated
+          </span>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-gray-900 transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        <ProgressDots
+          sessionQuestions={sessionQuestions}
+          ratings={ratings}
+          bookmarks={bookmarks}
+          currentIndex={currentIndex}
+          dispatch={dispatch}
+        />
       </div>
 
       {/* Question card */}
@@ -261,22 +312,22 @@ function QuizScreen({ state, dispatch }) {
                 🔖
               </button>
 
-            {/* Change question token */}
-            {!state.revealed && (
-              <button
-                onClick={handleChange}
-                disabled={!canChange}
-                title={canChange ? 'Replace with a different question' : 'No changes remaining'}
-                className={`flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-1.5 border transition-colors ${
-                  canChange
-                    ? 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 cursor-pointer'
-                    : 'border-gray-100 text-gray-300 cursor-not-allowed'
-                }`}
-              >
-                <span>↺</span>
-                <span>Change ({state.changesRemaining} left)</span>
-              </button>
-            )}
+              {/* Change question */}
+              {!showAnswer && (
+                <button
+                  onClick={handleChange}
+                  disabled={!canChange}
+                  title={canChange ? 'Replace with a different question' : 'No changes remaining'}
+                  className={`flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-1.5 border transition-colors ${
+                    canChange
+                      ? 'border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 cursor-pointer'
+                      : 'border-gray-100 text-gray-300 cursor-not-allowed'
+                  }`}
+                >
+                  <span>↺</span>
+                  <span>Change ({changesRemaining} left)</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -286,8 +337,9 @@ function QuizScreen({ state, dispatch }) {
         </CardHeader>
 
         <CardContent>
+          {/* Answer area */}
           <div className="mb-4">
-            {!state.revealed ? (
+            {!showAnswer ? (
               <Button
                 variant="outline"
                 onClick={() => dispatch({ type: 'REVEAL' })}
@@ -298,23 +350,24 @@ function QuizScreen({ state, dispatch }) {
             ) : (
               <div
                 className="rounded-lg bg-gray-50 border border-gray-200 p-4 text-gray-700 text-sm leading-relaxed"
-                style={{ animation: 'fadeSlideIn 0.25s ease forwards' }}
+                style={!currentRating ? { animation: 'fadeSlideIn 0.25s ease forwards' } : undefined}
               >
                 {question.answer}
               </div>
             )}
           </div>
 
-          {state.revealed && (
+          {/* Assessment buttons — shown once answer is visible */}
+          {showAnswer && (
             <div
               className="flex gap-3"
-              style={{ animation: 'fadeSlideIn 0.2s ease forwards' }}
+              style={!currentRating ? { animation: 'fadeSlideIn 0.2s ease forwards' } : undefined}
             >
               {Object.entries(RATING_META).map(([key, meta]) => (
                 <Button
                   key={key}
-                  variant={meta.btnVariant}
-                  className="flex-1"
+                  variant={currentRating === key ? meta.btnVariant : 'outline'}
+                  className={`flex-1 ${currentRating && currentRating !== key ? 'opacity-40' : ''}`}
                   onClick={() => dispatch({ type: 'RATE', id: question.id, rating: key })}
                 >
                   {meta.label}
@@ -324,6 +377,38 @@ function QuizScreen({ state, dispatch }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Navigation */}
+      <div className="flex items-center justify-between gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isFirst}
+          onClick={() => dispatch({ type: 'PREV' })}
+          className={isFirst ? 'opacity-30' : ''}
+        >
+          ← Prev
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => dispatch({ type: 'FINISH' })}
+          className="text-gray-400 hover:text-gray-700 text-xs"
+        >
+          Finish Session
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isLast}
+          onClick={() => dispatch({ type: 'NEXT' })}
+          className={isLast ? 'opacity-30' : ''}
+        >
+          Next →
+        </Button>
+      </div>
     </div>
   )
 }
@@ -349,13 +434,11 @@ function SummaryScreen({ state, dispatch }) {
             {sessionQuestions.length} questions · <Badge variant={state.level.toLowerCase()}>{state.level}</Badge>
           </p>
         </div>
-        <div className="flex gap-3 text-sm flex-wrap">
-          <span><Badge variant="good">{counts.good} Good</Badge></span>
-          <span><Badge variant="neutral">{counts.neutral} Neutral</Badge></span>
-          <span><Badge variant="bad">{counts.bad} Bad</Badge></span>
-          {bookmarkCount > 0 && (
-            <span><Badge variant="default">🔖 {bookmarkCount} Saved</Badge></span>
-          )}
+        <div className="flex gap-2 flex-wrap justify-end">
+          <Badge variant="good">{counts.good} Good</Badge>
+          <Badge variant="neutral">{counts.neutral} Neutral</Badge>
+          <Badge variant="bad">{counts.bad} Bad</Badge>
+          {bookmarkCount > 0 && <Badge variant="default">🔖 {bookmarkCount} Saved</Badge>}
         </div>
       </div>
 
@@ -444,8 +527,8 @@ export default function App() {
             </p>
           </header>
 
-          {state.screen === 'start' && <StartScreen dispatch={dispatch} />}
-          {state.screen === 'quiz' && <QuizScreen state={state} dispatch={dispatch} />}
+          {state.screen === 'start'   && <StartScreen dispatch={dispatch} />}
+          {state.screen === 'quiz'    && <QuizScreen state={state} dispatch={dispatch} />}
           {state.screen === 'summary' && <SummaryScreen state={state} dispatch={dispatch} />}
         </div>
       </div>
