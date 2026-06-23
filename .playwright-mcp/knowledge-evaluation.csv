@@ -1,0 +1,4 @@
+Question,Rating
+"What is the difference between `null` and `undefined` in JavaScript?",bad
+"Explain the CSS box model and how `box-sizing: border-box` changes it.",neutral
+"What is the React reconciliation algorithm and why does `key` matter?",neutral

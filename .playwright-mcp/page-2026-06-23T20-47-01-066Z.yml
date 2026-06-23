@@ -1,0 +1,13 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - heading "Knowledge Evaluation" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Review each question, reveal the answer, and assess your confidence.
+  - generic [ref=e8]:
+    - generic [ref=e10]:
+      - generic [ref=e11]: Question 1 of 3
+      - generic [ref=e12]: 0% complete
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - paragraph [ref=e16]: Question
+        - 'heading "What is the difference between `null` and `undefined` in JavaScript?" [level=2] [ref=e17]'
+      - button "Reveal Answer" [ref=e20] [cursor=pointer]
