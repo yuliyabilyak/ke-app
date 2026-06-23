@@ -61,6 +61,7 @@ const INITIAL_STATE = {
   currentIndex: 0,
   revealed: false,
   ratings: {},
+  bookmarks: {}, // { [id]: true }
   changesRemaining: 3,
 }
 
@@ -91,6 +92,13 @@ function reducer(state, action) {
       }
     }
 
+    case 'BOOKMARK': {
+      const bookmarks = { ...state.bookmarks }
+      if (bookmarks[action.id]) delete bookmarks[action.id]
+      else bookmarks[action.id] = true
+      return { ...state, bookmarks }
+    }
+
     case 'CHANGE': {
       const newSession = [...state.sessionQuestions]
       newSession[state.currentIndex] = action.replacement
@@ -119,13 +127,14 @@ const RATING_META = {
   bad:     { label: '❌ Bad',     variant: 'bad',     btnVariant: 'red'   },
 }
 
-function exportCSV(sessionQuestions, ratings) {
+function exportCSV(sessionQuestions, ratings, bookmarks) {
   const rows = [
-    ['Category', 'Question', 'Rating'],
+    ['Category', 'Question', 'Rating', 'Saved for Later'],
     ...sessionQuestions.map((q) => [
       `"${q.category}"`,
       `"${q.question.replace(/"/g, '""')}"`,
       ratings[q.id] ?? 'unrated',
+      bookmarks[q.id] ? 'yes' : 'no',
     ]),
   ]
   const csv = rows.map((r) => r.join(',')).join('\n')
@@ -200,6 +209,7 @@ function QuizScreen({ state, dispatch }) {
   const total = state.sessionQuestions.length
   const progress = (state.currentIndex / total) * 100
   const canChange = state.changesRemaining > 0 && state.availablePool.length > 0
+  const isBookmarked = !!state.bookmarks[question.id]
 
   function handleChange() {
     if (!canChange) return
@@ -237,6 +247,20 @@ function QuizScreen({ state, dispatch }) {
               <Badge variant={question.level.toLowerCase()}>{question.level}</Badge>
             </div>
 
+            <div className="flex items-center gap-2">
+              {/* Bookmark */}
+              <button
+                onClick={() => dispatch({ type: 'BOOKMARK', id: question.id })}
+                title={isBookmarked ? 'Remove bookmark' : 'Save for later'}
+                className={`text-base leading-none rounded-md px-2 py-1.5 border transition-colors cursor-pointer ${
+                  isBookmarked
+                    ? 'border-amber-300 bg-amber-50 text-amber-500'
+                    : 'border-gray-200 text-gray-300 hover:border-amber-300 hover:text-amber-400'
+                }`}
+              >
+                🔖
+              </button>
+
             {/* Change question token */}
             {!state.revealed && (
               <button
@@ -253,6 +277,7 @@ function QuizScreen({ state, dispatch }) {
                 <span>Change ({state.changesRemaining} left)</span>
               </button>
             )}
+            </div>
           </div>
 
           <h2 className="text-lg font-semibold text-gray-900 leading-snug mt-2">
@@ -306,13 +331,14 @@ function QuizScreen({ state, dispatch }) {
 // ── Summary Screen ─────────────────────────────────────────────────────────────
 
 function SummaryScreen({ state, dispatch }) {
-  const { sessionQuestions, ratings } = state
+  const { sessionQuestions, ratings, bookmarks } = state
 
   const counts = { good: 0, neutral: 0, bad: 0 }
   for (const q of sessionQuestions) {
     const r = ratings[q.id]
     if (r) counts[r]++
   }
+  const bookmarkCount = Object.keys(bookmarks).length
 
   return (
     <div className="flex flex-col gap-6">
@@ -323,10 +349,13 @@ function SummaryScreen({ state, dispatch }) {
             {sessionQuestions.length} questions · <Badge variant={state.level.toLowerCase()}>{state.level}</Badge>
           </p>
         </div>
-        <div className="flex gap-3 text-sm">
-          <span className="flex items-center gap-1"><Badge variant="good">{counts.good} Good</Badge></span>
-          <span className="flex items-center gap-1"><Badge variant="neutral">{counts.neutral} Neutral</Badge></span>
-          <span className="flex items-center gap-1"><Badge variant="bad">{counts.bad} Bad</Badge></span>
+        <div className="flex gap-3 text-sm flex-wrap">
+          <span><Badge variant="good">{counts.good} Good</Badge></span>
+          <span><Badge variant="neutral">{counts.neutral} Neutral</Badge></span>
+          <span><Badge variant="bad">{counts.bad} Bad</Badge></span>
+          {bookmarkCount > 0 && (
+            <span><Badge variant="default">🔖 {bookmarkCount} Saved</Badge></span>
+          )}
         </div>
       </div>
 
@@ -342,8 +371,11 @@ function SummaryScreen({ state, dispatch }) {
                   <th className="text-left text-xs font-semibold uppercase tracking-wide text-gray-400 px-5 py-3">
                     Question
                   </th>
-                  <th className="text-left text-xs font-semibold uppercase tracking-wide text-gray-400 px-5 py-3 w-28">
+                  <th className="text-left text-xs font-semibold uppercase tracking-wide text-gray-400 px-5 py-3 w-24">
                     Rating
+                  </th>
+                  <th className="text-center text-xs font-semibold uppercase tracking-wide text-gray-400 px-3 py-3 w-12">
+                    Later
                   </th>
                 </tr>
               </thead>
@@ -367,6 +399,9 @@ function SummaryScreen({ state, dispatch }) {
                           <Badge variant="default">—</Badge>
                         )}
                       </td>
+                      <td className="px-3 py-3 text-center text-base">
+                        {bookmarks[q.id] ? '🔖' : ''}
+                      </td>
                     </tr>
                   )
                 })}
@@ -375,7 +410,7 @@ function SummaryScreen({ state, dispatch }) {
           </div>
         </CardContent>
         <CardFooter className="flex gap-3 border-t border-gray-100 pt-4">
-          <Button variant="outline" onClick={() => exportCSV(sessionQuestions, ratings)}>
+          <Button variant="outline" onClick={() => exportCSV(sessionQuestions, ratings, bookmarks)}>
             Export CSV
           </Button>
           <Button onClick={() => dispatch({ type: 'RESTART' })}>Restart</Button>
